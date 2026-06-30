@@ -96,14 +96,12 @@
     button:hover { background: var(--primary-hover); }
     button:disabled { background: #cbd5e1; cursor: not-allowed; }
     
-    /* 三欄排版 */
     .columns-container {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
       gap: 20px;
     }
     
-    /* 手機版自動改為一欄 */
     @media (max-width: 768px) {
       .columns-container {
         grid-template-columns: 1fr;
@@ -111,7 +109,6 @@
       }
     }
     
-    /* 標題與人數一律靠左貼緊 */
     .list-title {
       font-size: 15px;
       font-weight: 700;
@@ -173,7 +170,6 @@
     }
     .admin-btn:hover { background: #f1f5f9; }
     
-    /* 新增：日期切換區區塊樣式 */
     .session-selector-zone {
       background: #e0e7ff;
       border: 2px solid #edd5ff;
@@ -241,7 +237,6 @@
 </div>
 
 <script>
-// Firebase 配置
 const firebaseConfig = {
   apiKey: "AIzaSyDpIQ0R8_ZRJ-P5c1zxVNpOHxiaNCoZiqk",
   authDomain: "basketball-signup-63f3e.firebaseapp.com",
@@ -258,7 +253,6 @@ const ADMIN_PASSWORD = "dan1225";
 let isAdminMode = false;
 const HOLIDAYS = ["2026-01-01", "2026-02-16", "2026-02-23", "2026-03-02", "2026-04-06", "2026-06-22", "2026-09-28", "2026-10-12", "2027-02-08", "2027-03-01", "2027-04-05", "2027-06-14", "2027-09-20"];
 
-// 全局變數控制當前選擇的球聚資訊
 let currentSelectedDateStr = "";
 let sessionOptionsData = {};
 let dbRef = null;
@@ -275,7 +269,6 @@ const adminStatus = document.getElementById("adminStatus");
 function formatDateToYYYYMMDD(date) { const y = date.getFullYear(); const m = String(date.getMonth() + 1).padStart(2, '0'); const d = String(date.getDate()).padStart(2, '0'); return `${y}-${m}-${d}`; }
 function formatFullTimestamp(ts) { const d = new Date(ts); const year = d.getFullYear(); const month = String(d.getMonth() + 1).padStart(2, '0'); const date = String(d.getDate()).padStart(2, '0'); const hh = String(d.getHours()).padStart(2, '0'); const mm = String(d.getMinutes()).padStart(2, '0'); const ss = String(d.getSeconds()).padStart(2, '0'); return `${year}/${month}/${date} ${hh}:${mm}:${ss}`; }
 
-// 計算特定基準時間點的週五球聚詳細規則
 function calculateSessionDetails(baseDate) {
   let targetDate = new Date(baseDate);
   const currentDay = targetDate.getDay();
@@ -312,32 +305,28 @@ function calculateSessionDetails(baseDate) {
   };
 }
 
-// 初始化選單：包含過去4週、當週、未來2週
 function initSelectorOptions() {
   const now = new Date();
   const currentSession = calculateSessionDetails(now);
   currentSelectedDateStr = currentSession.gameDateStr;
   
-  // 建立當週週五核心日期物件
   let coreFriday = new Date(currentSession.gameDateStr);
   
-  // 產生前後週期的日期選單 (-4 週 到 +2 週)
-  for (let i = -4; i <= 2; i++) {
+  // 修改：這裡的 i 從 -15 開始，往前抓 15 次歷史紀錄
+  for (let i = -15; i <= 2; i++) {
     let loopFriday = new Date(coreFriday);
     loopFriday.setDate(coreFriday.getDate() + (i * 7));
     let loopDateStr = formatDateToYYYYMMDD(loopFriday);
     
-    // 跳過已知假日
     if (HOLIDAYS.includes(loopDateStr)) continue;
     
-    // 計算該期數的開放/截止線
     const loopSession = calculateSessionDetails(new Date(loopFriday.getTime() - 5*24*60*60*1000));
-    loopSession.gameDateStr = loopDateStr; // 校正因 holiday 迴圈造成的誤差
+    loopSession.gameDateStr = loopDateStr; 
     
     let label = `📅 球聚日期：${loopDateStr} (週五)`;
     if (i === 0) label += "【⭐ 當期球聚】";
     else if (i < 0) label += "【倒流歷史紀錄】";
-    else label += "【未來預約期數】";
+    else label += "Intel【未來預約期數】";
     
     sessionOptionsData[loopDateStr] = loopSession;
     
@@ -351,18 +340,14 @@ function initSelectorOptions() {
   switchFirebaseNode(currentSelectedDateStr);
 }
 
-// 切換 Firebase 監聽節點
 function switchFirebaseNode(dateStr) {
-  if (dbRef) dbRef.off(); // 拔除舊日期的監聽
-  
+  if (dbRef) dbRef.off();
   currentSelectedDateStr = dateStr;
   dbRef = database.ref(`sessions/${dateStr}`);
-  
   dbRef.on("value", snapshot => { 
     rawCachedData = snapshot.val() || {}; 
     renderList(rawCachedData); 
   });
-  
   updateSystemStatus();
 }
 
@@ -390,7 +375,6 @@ function updateSystemStatus() {
   }
   deadlineMessage.innerHTML = msg;
 }
-// 定期更新狀態（主要維護當前狀態倒數）
 setInterval(updateSystemStatus, 5000);
 
 adminBtn.addEventListener("click", () => {
@@ -460,7 +444,6 @@ submitBtn.addEventListener("click", () => {
   });
 });
 
-// 啟動初始化選單
 initSelectorOptions();
 </script>
 </body>
