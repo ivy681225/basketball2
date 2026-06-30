@@ -269,32 +269,17 @@ const adminStatus = document.getElementById("adminStatus");
 function formatDateToYYYYMMDD(date) { const y = date.getFullYear(); const m = String(date.getMonth() + 1).padStart(2, '0'); const d = String(date.getDate()).padStart(2, '0'); return `${y}-${m}-${d}`; }
 function formatFullTimestamp(ts) { const d = new Date(ts); const year = d.getFullYear(); const month = String(d.getMonth() + 1).padStart(2, '0'); const date = String(d.getDate()).padStart(2, '0'); const hh = String(d.getHours()).padStart(2, '0'); const mm = String(d.getMinutes()).padStart(2, '0'); const ss = String(d.getSeconds()).padStart(2, '0'); return `${year}/${month}/${date} ${hh}:${mm}:${ss}`; }
 
-function calculateSessionDetails(baseDate) {
-  let targetDate = new Date(baseDate);
-  const currentDay = targetDate.getDay();
+// 單一場次時間規則計算
+function calculateSessionDetailsForDate(targetFriday) {
+  let dateStr = formatDateToYYYYMMDD(targetFriday);
   
-  const daysUntilFriday = (5 - currentDay + 7) % 7;
-  targetDate.setDate(targetDate.getDate() + daysUntilFriday);
-  
-  if (currentDay === 5 && baseDate.getHours() >= 20) { 
-    targetDate.setDate(targetDate.getDate() + 7); 
-  }
-  
-  let dateStr = formatDateToYYYYMMDD(targetDate);
-  while (HOLIDAYS.includes(dateStr)) { 
-    targetDate.setDate(targetDate.getDate() + 7); 
-    dateStr = formatDateToYYYYMMDD(targetDate); 
-  }
-  
-  const openTime = new Date(targetDate); 
-  openTime.setDate(targetDate.getDate() - 5); 
+  const openTime = new Date(targetFriday); 
+  openTime.setDate(targetFriday.getDate() - 5); 
   openTime.setHours(18, 0, 0, 0); 
   
-  const finalDeadline = new Date(targetDate); 
-  finalDeadline.setDate(targetDate.getDate() - 1); 
+  const finalDeadline = new Date(targetFriday); 
+  finalDeadline.setDate(targetFriday.getDate() - 1); 
   finalDeadline.setHours(18, 0, 0, 0);
-  
-  if (baseDate.getDay() === 6 && baseDate < openTime) { openTime.setHours(0, 0, 0, 0); }
   
   return { 
     gameDateStr: dateStr, 
@@ -305,37 +290,69 @@ function calculateSessionDetails(baseDate) {
   };
 }
 
+// 根據目前時間找出最適合的預設場次
+function findDefaultFridayStr(now, availableDates) {
+  let currentFriday = new Date(now);
+  const currentDay = currentFriday.getDay();
+  const daysUntilFriday = (5 - currentDay + 7) % 7;
+  currentFriday.setDate(currentFriday.getDate() + daysUntilFriday);
+  
+  if (currentDay === 5 && now.getHours() >= 20) { 
+    currentFriday.setDate(currentFriday.getDate() + 7); 
+  }
+  
+  let targetStr = formatDateToYYYYMMDD(currentFriday);
+  if (availableDates.includes(targetStr)) {
+    return targetStr;
+  }
+  
+  // 如果不在範圍內，找最接近的
+  if (targetStr < availableDates[0]) return availableDates[0];
+  if (targetStr > availableDates[availableDates.length - 1]) return availableDates[availableDates.length - 1];
+  return availableDates[0];
+}
+
 function initSelectorOptions() {
   const now = new Date();
-  const currentSession = calculateSessionDetails(now);
-  currentSelectedDateStr = currentSession.gameDateStr;
   
-  let coreFriday = new Date(currentSession.gameDateStr);
+  // 精準定義週五球聚的起訖區間
+  const startDate = new Date("2026-07-03");
+  const endDate = new Date("2026-09-25");
   
-  // 修改：這裡的 i 從 -15 開始，往前抓 15 次歷史紀錄
-  for (let i = -15; i <= 2; i++) {
-    let loopFriday = new Date(coreFriday);
-    loopFriday.setDate(coreFriday.getDate() + (i * 7));
-    let loopDateStr = formatDateToYYYYMMDD(loopFriday);
+  let availableDates = [];
+  let loopDate = new Date(startDate);
+  
+  while (loopDate <= endDate) {
+    let loopStr = formatDateToYYYYMMDD(loopDate);
+    if (!HOLIDAYS.includes(loopStr)) {
+      availableDates.push(loopStr);
+    }
+    loopDate.setDate(loopDate.getDate() + 7);
+  }
+  
+  currentSelectedDateStr = findDefaultFridayStr(now, availableDates);
+  
+  availableDates.forEach(dateStr => {
+    const fridayObj = new Date(dateStr);
+    const sessionDetails = calculateSessionDetailsForDate(fridayObj);
     
-    if (HOLIDAYS.includes(loopDateStr)) continue;
+    let label = `📅 球聚日期：${dateStr} (週五)`;
+    if (dateStr === currentSelectedDateStr) {
+      label += "【⭐ 當期球聚】";
+    } else if (dateStr < currentSelectedDateStr) {
+      label += "【倒流歷史紀錄】";
+    } else {
+      label += "【未來預約期數】";
+    }
     
-    const loopSession = calculateSessionDetails(new Date(loopFriday.getTime() - 5*24*60*60*1000));
-    loopSession.gameDateStr = loopDateStr; 
-    
-    let label = `📅 球聚日期：${loopDateStr} (週五)`;
-    if (i === 0) label += "【⭐ 當期球聚】";
-    else if (i < 0) label += "【倒流歷史紀錄】";
-    else label += "Intel【未來預約期數】";
-    
-    sessionOptionsData[loopDateStr] = loopSession;
+    sessionOptionsData[dateStr] = sessionDetails;
     
     const opt = document.createElement("option");
-    opt.value = loopDateStr;
+    opt.value = dateStr;
     opt.innerText = label;
-    if (loopDateStr === currentSelectedDateStr) opt.selected = true;
+    if (dateStr === currentSelectedDateStr) opt.selected = true;
     sessionSelect.appendChild(opt);
-  }
+  });
   
   switchFirebaseNode(currentSelectedDateStr);
 }
@@ -343,7 +360,7 @@ function initSelectorOptions() {
 function switchFirebaseNode(dateStr) {
   if (dbRef) dbRef.off();
   currentSelectedDateStr = dateStr;
-  dbRef = database.ref(`sessions/${dateStr}`);
+  dbRef = database.ref(`sessions_friday/${dateStr}`);
   dbRef.on("value", snapshot => { 
     rawCachedData = snapshot.val() || {}; 
     renderList(rawCachedData); 
@@ -406,14 +423,14 @@ function renderList(data) {
     if (player.identity === "季租") { idClass = "bg-blue"; labelText = "季租"; finalAttendCount++; } else { let idx = casualPlayers.findIndex(c => c.name === player.name); if (isClosed) { if (idx !== -1 && idx < availableSlots) { idClass = "bg-green"; labelText = `散打(遞補 ${idx + 1})`; finalAttendCount++; } else { idClass = "bg-orange"; labelText = `散打(候 ${idx - availableSlots + 1})`; targetContainer = waitList; finalWaitCount++; } } else { idClass = "bg-orange"; labelText = `散打(候 ${idx + 1})`; targetContainer = waitList; finalWaitCount++; } }
     
     const tagSpan = document.createElement("span"); tagSpan.className = `identity-tag ${idClass}`; tagSpan.innerText = labelText; metaDiv.appendChild(tagSpan); li.appendChild(metaDiv); const timeDiv = document.createElement("div"); timeDiv.className = "time-tag"; timeDiv.innerText = `⏱️ ${timeStr}`; li.appendChild(timeDiv);
-    if (isAdminMode) { const delBtn = document.createElement("button"); delBtn.innerText = "❌ 刪除"; delBtn.style.cssText = "align-self:flex-end; font-size:11px; margin-top:5px; cursor:pointer; width:auto; padding:2px 8px; background:#ef4444;"; delBtn.addEventListener("click", () => { if(confirm(`確認刪除 ${player.name}？`)) database.ref(`sessions/${currentSelectedDateStr}/${player.name}`).remove(); }); li.appendChild(delBtn); } targetContainer.appendChild(li);
+    if (isAdminMode) { const delBtn = document.createElement("button"); delBtn.innerText = "❌ 刪除"; delBtn.style.cssText = "align-self:flex-end; font-size:11px; margin-top:5px; cursor:pointer; width:auto; padding:2px 8px; background:#ef4444;"; delBtn.addEventListener("click", () => { if(confirm(`確認刪除 ${player.name}？`)) database.ref(`sessions_friday/${currentSelectedDateStr}/${player.name}`).remove(); }); li.appendChild(delBtn); } targetContainer.appendChild(li);
   });
   
   leavePlayers.forEach(player => {
     const timeStr = formatFullTimestamp(player.timestamp); const li = document.createElement("li"); const metaDiv = document.createElement("div"); metaDiv.className = "player-meta"; const nameSpan = document.createElement("span"); nameSpan.innerHTML = `<b>${player.name}</b>`; metaDiv.appendChild(nameSpan); const idClass = player.identity === "季租" ? "bg-blue" : "bg-green"; const tagSpan = document.createElement("span"); tagSpan.className = `identity-tag ${idClass}`; tagSpan.innerText = player.identity === "季租" ? "季租(假)" : "散打(假)"; metaDiv.appendChild(tagSpan); li.appendChild(metaDiv); const timeDiv = document.createElement("div"); timeDiv.className = "time-tag"; timeDiv.innerText = `⏱️ ${timeStr}`; li.appendChild(timeDiv);
-    if (isAdminMode) { const delBtn = document.createElement("button"); delBtn.innerText = "❌ 刪除"; delBtn.style.cssText = "align-self:flex-end; font-size:11px; margin-top:5px; cursor:pointer; width:auto; padding:2px 8px; background:#ef4444;"; delBtn.addEventListener("click", () => { database.ref(`sessions/${currentSelectedDateStr}/${player.name}`).remove(); }); li.appendChild(delBtn); } leaveList.appendChild(li);
+    if (isAdminMode) { const delBtn = document.createElement("button"); delBtn.innerText = "❌ 刪除"; delBtn.style.cssText = "align-self:flex-end; font-size:11px; margin-top:5px; cursor:pointer; width:auto; padding:2px 8px; background:#ef4444;"; delBtn.addEventListener("click", () => { database.ref(`sessions_friday/${currentSelectedDateStr}/${player.name}`).remove(); }); li.appendChild(delBtn); } leaveList.appendChild(li);
   });
-  document.getElementById("attendCount").innerText = finalAttendCount; document.getElementById("waitCount").innerText = finalWaitCount; document.getElementById("leaveCount").innerText = leavePlayers.length;
+  document.getElementById("attendCount").innerText = finalAttendCount; document.getElementById("waitCount").innerText = finalWaitCount; document.getElementById("leaveCount").length;
 }
 
 submitBtn.addEventListener("click", () => {
@@ -426,7 +443,7 @@ submitBtn.addEventListener("click", () => {
   if (now >= activeSession.deadline && !isAdminMode) { alert("🔒 本期報名已截止，目前系統已鎖定，無法再進行新增或修改意願。"); return; }
   
   submitBtn.disabled = true; submitBtn.innerText = "處理中...";
-  const userRef = database.ref(`sessions/${currentSelectedDateStr}/${name}`);
+  const userRef = database.ref(`sessions_friday/${currentSelectedDateStr}/${name}`);
   
   userRef.set({ 
     name: name, 
