@@ -249,15 +249,43 @@ function getGameSessionDetails() {
   const now = new Date();
   let targetDate = new Date();
   const currentDay = now.getDay(); 
-  const daysUntilMonday = (1 - currentDay + 7) % 7;
-  targetDate.setDate(now.getDate() + daysUntilMonday);
-  if (currentDay === 1 || targetDate.getDate() === now.getDate()) { targetDate.setDate(targetDate.getDate() + 7); }
+  
+  // 計算下一個週五的日期
+  const daysUntilFriday = (5 - currentDay + 7) % 7;
+  targetDate.setDate(now.getDate() + daysUntilFriday);
+  
+  // 如果今天就是週五，或者計算出來是今天，則自動切換到下週五
+  if (currentDay === 5 || targetDate.getDate() === now.getDate()) { 
+    targetDate.setDate(targetDate.getDate() + 7); 
+  }
+  
   let dateStr = formatDateToYYYYMMDD(targetDate);
-  while (HOLIDAYS.includes(dateStr)) { targetDate.setDate(targetDate.getDate() + 7); dateStr = formatDateToYYYYMMDD(targetDate); }
-  const openTime = new Date(targetDate); openTime.setDate(targetDate.getDate() - 6); openTime.setHours(18, 0, 0, 0); 
-  const finalDeadline = new Date(targetDate); finalDeadline.setDate(targetDate.getDate() - 1); finalDeadline.setHours(18, 0, 0, 0);
-  if (now.getDay() === 2 && now < openTime) { openTime.setHours(0, 0, 0, 0); }
-  return { gameDateStr: dateStr, openDateStr: formatDateToYYYYMMDD(openTime), deadlineDateStr: formatDateToYYYYMMDD(finalDeadline), openTime, deadline: finalDeadline };
+  // 若遇到假日則再往後延一週
+  while (HOLIDAYS.includes(dateStr)) { 
+    targetDate.setDate(targetDate.getDate() + 7); 
+    dateStr = formatDateToYYYYMMDD(targetDate); 
+  }
+  
+  // 開放時間：球聚前一週的星期日 18:00 (即球聚當週五的前 5 天)
+  const openTime = new Date(targetDate); 
+  openTime.setDate(targetDate.getDate() - 5); 
+  openTime.setHours(18, 0, 0, 0); 
+  
+  // 截止時間：球聚當週的星期四 18:00 (即球聚當週五的前 1 天)
+  const finalDeadline = new Date(targetDate); 
+  finalDeadline.setDate(targetDate.getDate() - 1); 
+  finalDeadline.setHours(18, 0, 0, 0);
+  
+  // 特殊安全防護：如果是在週六且未到開放時間，做時間重設
+  if (now.getDay() === 6 && now < openTime) { openTime.setHours(0, 0, 0, 0); }
+  
+  return { 
+    gameDateStr: dateStr, 
+    openDateStr: formatDateToYYYYMMDD(openTime), 
+    deadlineDateStr: formatDateToYYYYMMDD(finalDeadline), 
+    openTime, 
+    deadline: finalDeadline 
+  };
 }
 
 function formatDateToYYYYMMDD(date) { const y = date.getFullYear(); const m = String(date.getMonth() + 1).padStart(2, '0'); const d = String(date.getDate()).padStart(2, '0'); return `${y}-${m}-${d}`; }
