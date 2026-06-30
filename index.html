@@ -172,11 +172,24 @@
       width: auto;
     }
     .admin-btn:hover { background: #f1f5f9; }
+    
+    /* 新增：日期切換區區塊樣式 */
+    .session-selector-zone {
+      background: #e0e7ff;
+      border: 2px solid #edd5ff;
+    }
   </style>
 </head>
 <body>
 
 <div class="container">
+  <div class="card form-card session-selector-zone">
+    <div class="form-group" style="margin-bottom: 0;">
+      <label for="sessionSelect" style="color: #4f46e5; font-size: 15px;">🔍 切換球聚歷史紀錄 / 預約期數：</label>
+      <select id="sessionSelect" style="border-color: #4f46e5; font-weight: bold; color: #4f46e5;"></select>
+    </div>
+  </div>
+
   <div class="card form-card">
     <h2>🏀 週五球聚登記系統</h2>
     <div class="status-msg" id="deadlineMessage">載入系統狀態中...</div>
@@ -245,39 +258,50 @@ const ADMIN_PASSWORD = "dan1225";
 let isAdminMode = false;
 const HOLIDAYS = ["2026-01-01", "2026-02-16", "2026-02-23", "2026-03-02", "2026-04-06", "2026-06-22", "2026-09-28", "2026-10-12", "2027-02-08", "2027-03-01", "2027-04-05", "2027-06-14", "2027-09-20"];
 
-function getGameSessionDetails() {
-  const now = new Date();
-  let targetDate = new Date();
-  const currentDay = now.getDay(); 
+// 全局變數控制當前選擇的球聚資訊
+let currentSelectedDateStr = "";
+let sessionOptionsData = {};
+let dbRef = null;
+let rawCachedData = {};
+
+const sessionSelect = document.getElementById("sessionSelect");
+const deadlineMessage = document.getElementById("deadlineMessage");
+const submitBtn = document.getElementById("submitBtn");
+const nameInput = document.getElementById("name");
+const identitySelect = document.getElementById("identity");
+const adminBtn = document.getElementById("adminBtn");
+const adminStatus = document.getElementById("adminStatus");
+
+function formatDateToYYYYMMDD(date) { const y = date.getFullYear(); const m = String(date.getMonth() + 1).padStart(2, '0'); const d = String(date.getDate()).padStart(2, '0'); return `${y}-${m}-${d}`; }
+function formatFullTimestamp(ts) { const d = new Date(ts); const year = d.getFullYear(); const month = String(d.getMonth() + 1).padStart(2, '0'); const date = String(d.getDate()).padStart(2, '0'); const hh = String(d.getHours()).padStart(2, '0'); const mm = String(d.getMinutes()).padStart(2, '0'); const ss = String(d.getSeconds()).padStart(2, '0'); return `${year}/${month}/${date} ${hh}:${mm}:${ss}`; }
+
+// 計算特定基準時間點的週五球聚詳細規則
+function calculateSessionDetails(baseDate) {
+  let targetDate = new Date(baseDate);
+  const currentDay = targetDate.getDay();
   
-  // 計算下一個週五的日期
   const daysUntilFriday = (5 - currentDay + 7) % 7;
-  targetDate.setDate(now.getDate() + daysUntilFriday);
+  targetDate.setDate(targetDate.getDate() + daysUntilFriday);
   
-  // 如果今天就是週五，或者計算出來是今天，則自動切換到下週五
-  if (currentDay === 5 || targetDate.getDate() === now.getDate()) { 
+  if (currentDay === 5 && baseDate.getHours() >= 20) { 
     targetDate.setDate(targetDate.getDate() + 7); 
   }
   
   let dateStr = formatDateToYYYYMMDD(targetDate);
-  // 若遇到假日則再往後延一週
   while (HOLIDAYS.includes(dateStr)) { 
     targetDate.setDate(targetDate.getDate() + 7); 
     dateStr = formatDateToYYYYMMDD(targetDate); 
   }
   
-  // 開放時間：球聚前一週的星期日 18:00 (即球聚當週五的前 5 天)
   const openTime = new Date(targetDate); 
   openTime.setDate(targetDate.getDate() - 5); 
   openTime.setHours(18, 0, 0, 0); 
   
-  // 截止時間：球聚當週的星期四 18:00 (即球聚當週五的前 1 天)
   const finalDeadline = new Date(targetDate); 
   finalDeadline.setDate(targetDate.getDate() - 1); 
   finalDeadline.setHours(18, 0, 0, 0);
   
-  // 特殊安全防護：如果是在週六且未到開放時間，做時間重設
-  if (now.getDay() === 6 && now < openTime) { openTime.setHours(0, 0, 0, 0); }
+  if (baseDate.getDay() === 6 && baseDate < openTime) { openTime.setHours(0, 0, 0, 0); }
   
   return { 
     gameDateStr: dateStr, 
@@ -288,37 +312,91 @@ function getGameSessionDetails() {
   };
 }
 
-function formatDateToYYYYMMDD(date) { const y = date.getFullYear(); const m = String(date.getMonth() + 1).padStart(2, '0'); const d = String(date.getDate()).padStart(2, '0'); return `${y}-${m}-${d}`; }
-function formatFullTimestamp(ts) { const d = new Date(ts); const year = d.getFullYear(); const month = String(d.getMonth() + 1).padStart(2, '0'); const date = String(d.getDate()).padStart(2, '0'); const hh = String(d.getHours()).padStart(2, '0'); const mm = String(d.getMinutes()).padStart(2, '0'); const ss = String(d.getSeconds()).padStart(2, '0'); return `${year}/${month}/${date} ${hh}:${mm}:${ss}`; }
+// 初始化選單：包含過去4週、當週、未來2週
+function initSelectorOptions() {
+  const now = new Date();
+  const currentSession = calculateSessionDetails(now);
+  currentSelectedDateStr = currentSession.gameDateStr;
+  
+  // 建立當週週五核心日期物件
+  let coreFriday = new Date(currentSession.gameDateStr);
+  
+  // 產生前後週期的日期選單 (-4 週 到 +2 週)
+  for (let i = -4; i <= 2; i++) {
+    let loopFriday = new Date(coreFriday);
+    loopFriday.setDate(coreFriday.getDate() + (i * 7));
+    let loopDateStr = formatDateToYYYYMMDD(loopFriday);
+    
+    // 跳過已知假日
+    if (HOLIDAYS.includes(loopDateStr)) continue;
+    
+    // 計算該期數的開放/截止線
+    const loopSession = calculateSessionDetails(new Date(loopFriday.getTime() - 5*24*60*60*1000));
+    loopSession.gameDateStr = loopDateStr; // 校正因 holiday 迴圈造成的誤差
+    
+    let label = `📅 球聚日期：${loopDateStr} (週五)`;
+    if (i === 0) label += "【⭐ 當期球聚】";
+    else if (i < 0) label += "【倒流歷史紀錄】";
+    else label += "【未來預約期數】";
+    
+    sessionOptionsData[loopDateStr] = loopSession;
+    
+    const opt = document.createElement("option");
+    opt.value = loopDateStr;
+    opt.innerText = label;
+    if (loopDateStr === currentSelectedDateStr) opt.selected = true;
+    sessionSelect.appendChild(opt);
+  }
+  
+  switchFirebaseNode(currentSelectedDateStr);
+}
 
-const session = getGameSessionDetails();
-const dbRef = database.ref(`sessions/${session.gameDateStr}`);
-const deadlineMessage = document.getElementById("deadlineMessage");
-const submitBtn = document.getElementById("submitBtn");
-const nameInput = document.getElementById("name");
-const identitySelect = document.getElementById("identity");
-const adminBtn = document.getElementById("adminBtn");
-const adminStatus = document.getElementById("adminStatus");
-let rawCachedData = {};
+// 切換 Firebase 監聽節點
+function switchFirebaseNode(dateStr) {
+  if (dbRef) dbRef.off(); // 拔除舊日期的監聽
+  
+  currentSelectedDateStr = dateStr;
+  dbRef = database.ref(`sessions/${dateStr}`);
+  
+  dbRef.on("value", snapshot => { 
+    rawCachedData = snapshot.val() || {}; 
+    renderList(rawCachedData); 
+  });
+  
+  updateSystemStatus();
+}
+
+sessionSelect.addEventListener("change", (e) => {
+  switchFirebaseNode(e.target.value);
+});
 
 function updateSystemStatus() {
   const now = new Date();
-  let msg = `📅 <b>本次球聚日期：${session.gameDateStr} (週五) 18:00-20:00</b><br>`;
-  const isOpen = now >= session.openTime && now < session.deadline;
-  msg += `🔹 季租登記：<b>${session.openDateStr}</b> (日) 18:00 ~ <b>${session.deadlineDateStr}</b> (四) 18:00 (${isOpen ? '🟢 開放中' : '🔒 已截止'})<br>`;
-  msg += `🔸 散打登記：<b>${session.openDateStr}</b> (日) 18:00 ~ <b>${session.deadlineDateStr}</b> (四) 18:00 (${isOpen ? '🟢 開放中' : '🔒 已截止'})<br>`;
-  msg += `📢 <b>目前狀態：【開放登記中，散打一律於候補區排隊，待週四 18:00 截止後才進行遞補】</b>`;
+  const activeSession = sessionOptionsData[currentSelectedDateStr];
+  if (!activeSession) return;
+  
+  let msg = `📅 <b>本次球聚日期：${activeSession.gameDateStr} (週五) 18:00-20:00</b><br>`;
+  const isOpen = now >= activeSession.openTime && now < activeSession.deadline;
+  
+  msg += `🔹 季租登記：<b>${activeSession.openDateStr}</b> (日) 18:00 ~ <b>${activeSession.deadlineDateStr}</b> (四) 18:00 (${isOpen ? '🟢 開放中' : '🔒 已截止'})<br>`;
+  msg += `🔸 散打登記：<b>${activeSession.openDateStr}</b> (日) 18:00 ~ <b>${activeSession.deadlineDateStr}</b> (四) 18:00 (${isOpen ? '🟢 開放中' : '🔒 已截止'})<br>`;
+  
+  if (now < activeSession.openTime) {
+    msg += `📢 <b>目前狀態：【🔒 尚未開放登記】</b>`;
+  } else if (now >= activeSession.deadline) {
+    msg += `📢 <b>目前狀態：【🔒 登記已截止，系統鎖定中】</b>`;
+  } else {
+    msg += `📢 <b>目前狀態：【🟢 開放登記中，散打一律於候補區排隊，待週四 18:00 截止後才進行遞補】</b>`;
+  }
   deadlineMessage.innerHTML = msg;
 }
-setInterval(updateSystemStatus, 1000);
-updateSystemStatus();
+// 定期更新狀態（主要維護當前狀態倒數）
+setInterval(updateSystemStatus, 5000);
 
 adminBtn.addEventListener("click", () => {
   const inputPwd = prompt("請輸入管理員密碼：");
   if (inputPwd === ADMIN_PASSWORD) { isAdminMode = true; adminBtn.style.display = "none"; adminStatus.style.display = "inline"; alert("🔑 管理員認證成功！❌ 刪除功能已解鎖。"); renderList(rawCachedData); } else if (inputPwd !== null) { alert("❌ 密碼錯誤！"); }
 });
-
-dbRef.on("value", snapshot => { rawCachedData = snapshot.val() || {}; renderList(rawCachedData); });
 
 function renderList(data) {
   const attendList = document.getElementById("attendList"); const waitList = document.getElementById("waitList"); const leaveList = document.getElementById("leaveList");
@@ -327,7 +405,10 @@ function renderList(data) {
   const players = []; for (let id in data) { players.push({ id, ...data[id] }); }
   players.sort((a, b) => a.timestamp - b.timestamp);
   
-  const now = new Date(); const isClosed = now >= session.deadline;
+  const now = new Date();
+  const activeSession = sessionOptionsData[currentSelectedDateStr];
+  const isClosed = activeSession ? now >= activeSession.deadline : true;
+  
   let seasonAttendCount = 0; let casualPlayers = []; let leavePlayers = [];
   
   players.forEach(p => { if (p.status === "請假") { leavePlayers.push(p); } else if (p.status === "出賽") { if (p.identity === "季租") { seasonAttendCount++; } else { casualPlayers.push(p); } } });
@@ -341,23 +422,27 @@ function renderList(data) {
     if (player.identity === "季租") { idClass = "bg-blue"; labelText = "季租"; finalAttendCount++; } else { let idx = casualPlayers.findIndex(c => c.name === player.name); if (isClosed) { if (idx !== -1 && idx < availableSlots) { idClass = "bg-green"; labelText = `散打(遞補 ${idx + 1})`; finalAttendCount++; } else { idClass = "bg-orange"; labelText = `散打(候 ${idx - availableSlots + 1})`; targetContainer = waitList; finalWaitCount++; } } else { idClass = "bg-orange"; labelText = `散打(候 ${idx + 1})`; targetContainer = waitList; finalWaitCount++; } }
     
     const tagSpan = document.createElement("span"); tagSpan.className = `identity-tag ${idClass}`; tagSpan.innerText = labelText; metaDiv.appendChild(tagSpan); li.appendChild(metaDiv); const timeDiv = document.createElement("div"); timeDiv.className = "time-tag"; timeDiv.innerText = `⏱️ ${timeStr}`; li.appendChild(timeDiv);
-    if (isAdminMode) { const delBtn = document.createElement("button"); delBtn.innerText = "❌ 刪除"; delBtn.style.cssText = "align-self:flex-end; font-size:11px; margin-top:5px; cursor:pointer; width:auto; padding:2px 8px; background:#ef4444;"; delBtn.addEventListener("click", () => { if(confirm(`確認刪除 ${player.name}？`)) database.ref(`sessions/${session.gameDateStr}/${player.name}`).remove(); }); li.appendChild(delBtn); } targetContainer.appendChild(li);
+    if (isAdminMode) { const delBtn = document.createElement("button"); delBtn.innerText = "❌ 刪除"; delBtn.style.cssText = "align-self:flex-end; font-size:11px; margin-top:5px; cursor:pointer; width:auto; padding:2px 8px; background:#ef4444;"; delBtn.addEventListener("click", () => { if(confirm(`確認刪除 ${player.name}？`)) database.ref(`sessions/${currentSelectedDateStr}/${player.name}`).remove(); }); li.appendChild(delBtn); } targetContainer.appendChild(li);
   });
   
   leavePlayers.forEach(player => {
     const timeStr = formatFullTimestamp(player.timestamp); const li = document.createElement("li"); const metaDiv = document.createElement("div"); metaDiv.className = "player-meta"; const nameSpan = document.createElement("span"); nameSpan.innerHTML = `<b>${player.name}</b>`; metaDiv.appendChild(nameSpan); const idClass = player.identity === "季租" ? "bg-blue" : "bg-green"; const tagSpan = document.createElement("span"); tagSpan.className = `identity-tag ${idClass}`; tagSpan.innerText = player.identity === "季租" ? "季租(假)" : "散打(假)"; metaDiv.appendChild(tagSpan); li.appendChild(metaDiv); const timeDiv = document.createElement("div"); timeDiv.className = "time-tag"; timeDiv.innerText = `⏱️ ${timeStr}`; li.appendChild(timeDiv);
-    if (isAdminMode) { const delBtn = document.createElement("button"); delBtn.innerText = "❌ 刪除"; delBtn.style.cssText = "align-self:flex-end; font-size:11px; margin-top:5px; cursor:pointer; width:auto; padding:2px 8px; background:#ef4444;"; delBtn.addEventListener("click", () => { database.ref(`sessions/${session.gameDateStr}/${player.name}`).remove(); }); li.appendChild(delBtn); } leaveList.appendChild(li);
+    if (isAdminMode) { const delBtn = document.createElement("button"); delBtn.innerText = "❌ 刪除"; delBtn.style.cssText = "align-self:flex-end; font-size:11px; margin-top:5px; cursor:pointer; width:auto; padding:2px 8px; background:#ef4444;"; delBtn.addEventListener("click", () => { database.ref(`sessions/${currentSelectedDateStr}/${player.name}`).remove(); }); li.appendChild(delBtn); } leaveList.appendChild(li);
   });
   document.getElementById("attendCount").innerText = finalAttendCount; document.getElementById("waitCount").innerText = finalWaitCount; document.getElementById("leaveCount").innerText = leavePlayers.length;
 }
 
 submitBtn.addEventListener("click", () => {
   const name = nameInput.value.trim(); const identity = identitySelect.value; const status = document.querySelector('input[name="status"]:checked').value; const now = new Date();
-  if (!name) { alert("請輸入姓名！"); return; } if (now < session.openTime) { alert("抱歉！本輪球聚尚未開放登記。"); return; } 
-  if (now >= session.deadline && !isAdminMode) { alert("🔒 報名已於週四 18:00 截止，目前系統已鎖定，無法再進行新增或修改意願。"); return; }
+  const activeSession = sessionOptionsData[currentSelectedDateStr];
+  
+  if (!activeSession) return;
+  if (!name) { alert("請輸入姓名！"); return; } 
+  if (now < activeSession.openTime) { alert(`抱歉！【${currentSelectedDateStr}】球聚尚未開放登記。`); return; } 
+  if (now >= activeSession.deadline && !isAdminMode) { alert("🔒 本期報名已截止，目前系統已鎖定，無法再進行新增或修改意願。"); return; }
   
   submitBtn.disabled = true; submitBtn.innerText = "處理中...";
-  const userRef = database.ref(`sessions/${session.gameDateStr}/${name}`);
+  const userRef = database.ref(`sessions/${currentSelectedDateStr}/${name}`);
   
   userRef.set({ 
     name: name, 
@@ -365,7 +450,7 @@ submitBtn.addEventListener("click", () => {
     status: status, 
     timestamp: firebase.database.ServerValue.TIMESTAMP 
   }).then(() => { 
-    alert(`🎉 【${name}】資料已更新成功！\n排序已依據此修改時間重新調整。`); 
+    alert(`🎉 【${name}】在 ${currentSelectedDateStr} 的資料已更新成功！`); 
     nameInput.value = ""; 
   }).catch(err => {
     alert("儲存失敗：" + err.message);
@@ -374,6 +459,9 @@ submitBtn.addEventListener("click", () => {
     submitBtn.innerText = "確認送出報名"; 
   });
 });
+
+// 啟動初始化選單
+initSelectorOptions();
 </script>
 </body>
 </html>
