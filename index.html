@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>球隊每週球聚登記系統 - 週五場</title>
+  <title>球隊每週球聚登記系統</title>
   
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
   <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
@@ -96,12 +96,14 @@
     button:hover { background: var(--primary-hover); }
     button:disabled { background: #cbd5e1; cursor: not-allowed; }
     
+    /* 三欄排版 */
     .columns-container {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
       gap: 20px;
     }
     
+    /* 手機版自動改為一欄 */
     @media (max-width: 768px) {
       .columns-container {
         grid-template-columns: 1fr;
@@ -109,6 +111,7 @@
       }
     }
     
+    /* 標題與人數一律靠左貼緊 */
     .list-title {
       font-size: 15px;
       font-weight: 700;
@@ -147,4 +150,202 @@
       white-space: nowrap;
     }
     .bg-blue { background-color: #3b82f6; }
-    .bg-green { background-color: #10
+    .bg-green { background-color: #10b981; }
+    .bg-orange { background-color: #f97316; }
+    .time-tag {
+      font-size: 11px;
+      color: var(--text-light);
+      margin-top: 4px;
+    }
+    
+    .admin-area {
+      display: flex;
+      justify-content: center;
+      margin-top: 30px;
+    }
+    .admin-btn {
+      background: none;
+      color: var(--text-light);
+      border: 1px dashed var(--border);
+      padding: 6px 16px;
+      font-size: 12px;
+      width: auto;
+    }
+    .admin-btn:hover { background: #f1f5f9; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <div class="card form-card">
+    <h2>🏀 週五球聚登記系統</h2>
+    <div class="status-msg" id="deadlineMessage">載入系統狀態中...</div>
+  </div>
+
+  <div class="card form-card">
+    <div class="form-group">
+      <label for="name">您的姓名：</label>
+      <input type="text" id="name" placeholder="請輸入您在 LINE 群組裡的名字 (範例:王大明)" autocomplete="off">
+    </div>
+    <div class="form-group">
+      <label for="identity">身分類別：</label>
+      <select id="identity">
+        <option value="季租">季租</option>
+        <option value="散打">散打</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>本次意願</label>
+      <div class="radio-group">
+        <label class="radio-label"><input type="radio" name="status" value="出賽" checked> 🔥 出賽</label>
+        <label class="radio-label"><input type="radio" name="status" value="請假"> 💤 請假</label>
+      </div>
+    </div>
+    <button id="submitBtn">確認送出報名</button>
+  </div>
+
+  <div class="columns-container">
+    <div class="card">
+      <div class="list-title">🟢 正取 (<span id="attendCount">0</span>/20)</div>
+      <ul id="attendList"></ul>
+    </div>
+
+    <div class="card">
+      <div class="list-title">🟠 候補 (<span id="waitCount">0</span>)</div>
+      <ul id="waitList"></ul>
+    </div>
+
+    <div class="card">
+      <div class="list-title">⚪ 請假 (<span id="leaveCount">0</span>)</div>
+      <ul id="leaveList"></ul>
+    </div>
+  </div>
+
+  <div class="admin-area">
+    <button class="admin-btn" id="adminBtn">🔑 管理員登入</button>
+    <span id="adminStatus" style="display:none; font-size:12px; color:#ef4444; font-weight:700;">🔓 管理員模式運作中 (刪除鈕已解鎖)</span>
+  </div>
+</div>
+
+<script>
+// Firebase 配置
+const firebaseConfig = {
+  apiKey: "AIzaSyDpIQ0R8_ZRJ-P5c1zxVNpOHxiaNCoZiqk",
+  authDomain: "basketball-signup-63f3e.firebaseapp.com",
+  databaseURL: "https://basketball-signup-63f3e-default-rtdb.firebaseio.com",
+  projectId: "basketball-signup-63f3e",
+  storageBucket: "basketball-signup-63f3e.firebasestorage.app",
+  messagingSenderId: "187195370555",
+  appId: "1:187195370555:web:f56a0d89034f7d29f6001e"
+};
+
+if (!firebase.apps.length) { firebase.initializeApp(firebaseConfig); }
+const database = firebase.database();
+const ADMIN_PASSWORD = "dan1225"; 
+let isAdminMode = false;
+const HOLIDAYS = ["2026-01-01", "2026-02-16", "2026-02-23", "2026-03-02", "2026-04-06", "2026-06-22", "2026-09-28", "2026-10-12", "2027-02-08", "2027-03-01", "2027-04-05", "2027-06-14", "2027-09-20"];
+
+function getGameSessionDetails() {
+  const now = new Date();
+  let targetDate = new Date();
+  const currentDay = now.getDay(); 
+  const daysUntilMonday = (1 - currentDay + 7) % 7;
+  targetDate.setDate(now.getDate() + daysUntilMonday);
+  if (currentDay === 1 || targetDate.getDate() === now.getDate()) { targetDate.setDate(targetDate.getDate() + 7); }
+  let dateStr = formatDateToYYYYMMDD(targetDate);
+  while (HOLIDAYS.includes(dateStr)) { targetDate.setDate(targetDate.getDate() + 7); dateStr = formatDateToYYYYMMDD(targetDate); }
+  const openTime = new Date(targetDate); openTime.setDate(targetDate.getDate() - 6); openTime.setHours(18, 0, 0, 0); 
+  const finalDeadline = new Date(targetDate); finalDeadline.setDate(targetDate.getDate() - 1); finalDeadline.setHours(18, 0, 0, 0);
+  if (now.getDay() === 2 && now < openTime) { openTime.setHours(0, 0, 0, 0); }
+  return { gameDateStr: dateStr, openDateStr: formatDateToYYYYMMDD(openTime), deadlineDateStr: formatDateToYYYYMMDD(finalDeadline), openTime, deadline: finalDeadline };
+}
+
+function formatDateToYYYYMMDD(date) { const y = date.getFullYear(); const m = String(date.getMonth() + 1).padStart(2, '0'); const d = String(date.getDate()).padStart(2, '0'); return `${y}-${m}-${d}`; }
+function formatFullTimestamp(ts) { const d = new Date(ts); const year = d.getFullYear(); const month = String(d.getMonth() + 1).padStart(2, '0'); const date = String(d.getDate()).padStart(2, '0'); const hh = String(d.getHours()).padStart(2, '0'); const mm = String(d.getMinutes()).padStart(2, '0'); const ss = String(d.getSeconds()).padStart(2, '0'); return `${year}/${month}/${date} ${hh}:${mm}:${ss}`; }
+
+const session = getGameSessionDetails();
+const dbRef = database.ref(`sessions/${session.gameDateStr}`);
+const deadlineMessage = document.getElementById("deadlineMessage");
+const submitBtn = document.getElementById("submitBtn");
+const nameInput = document.getElementById("name");
+const identitySelect = document.getElementById("identity");
+const adminBtn = document.getElementById("adminBtn");
+const adminStatus = document.getElementById("adminStatus");
+let rawCachedData = {};
+
+function updateSystemStatus() {
+  const now = new Date();
+  let msg = `📅 <b>本次球聚日期：${session.gameDateStr} (週五) 18:00-20:00</b><br>`;
+  const isOpen = now >= session.openTime && now < session.deadline;
+  msg += `🔹 季租登記：<b>${session.openDateStr}</b> (日) 18:00 ~ <b>${session.deadlineDateStr}</b> (四) 18:00 (${isOpen ? '🟢 開放中' : '🔒 已截止'})<br>`;
+  msg += `🔸 散打登記：<b>${session.openDateStr}</b> (日) 18:00 ~ <b>${session.deadlineDateStr}</b> (四) 18:00 (${isOpen ? '🟢 開放中' : '🔒 已截止'})<br>`;
+  msg += `📢 <b>目前狀態：【開放登記中，散打一律於候補區排隊，待週四 18:00 截止後才進行遞補】</b>`;
+  deadlineMessage.innerHTML = msg;
+}
+setInterval(updateSystemStatus, 1000);
+updateSystemStatus();
+
+adminBtn.addEventListener("click", () => {
+  const inputPwd = prompt("請輸入管理員密碼：");
+  if (inputPwd === ADMIN_PASSWORD) { isAdminMode = true; adminBtn.style.display = "none"; adminStatus.style.display = "inline"; alert("🔑 管理員認證成功！❌ 刪除功能已解鎖。"); renderList(rawCachedData); } else if (inputPwd !== null) { alert("❌ 密碼錯誤！"); }
+});
+
+dbRef.on("value", snapshot => { rawCachedData = snapshot.val() || {}; renderList(rawCachedData); });
+
+function renderList(data) {
+  const attendList = document.getElementById("attendList"); const waitList = document.getElementById("waitList"); const leaveList = document.getElementById("leaveList");
+  attendList.innerHTML = ""; waitList.innerHTML = ""; leaveList.innerHTML = "";
+  
+  const players = []; for (let id in data) { players.push({ id, ...data[id] }); }
+  players.sort((a, b) => a.timestamp - b.timestamp);
+  
+  const now = new Date(); const isClosed = now >= session.deadline;
+  let seasonAttendCount = 0; let casualPlayers = []; let leavePlayers = [];
+  
+  players.forEach(p => { if (p.status === "請假") { leavePlayers.push(p); } else if (p.status === "出賽") { if (p.identity === "季租") { seasonAttendCount++; } else { casualPlayers.push(p); } } });
+  let availableSlots = Math.max(0, 20 - seasonAttendCount); let finalAttendCount = 0; let finalWaitCount = 0;
+  
+  players.forEach(player => {
+    if (player.status === "請假") return;
+    const timeStr = formatFullTimestamp(player.timestamp); const li = document.createElement("li"); const metaDiv = document.createElement("div"); metaDiv.className = "player-meta"; const nameSpan = document.createElement("span"); nameSpan.innerHTML = `<b>${player.name}</b>`; metaDiv.appendChild(nameSpan);
+    let labelText = ""; let idClass = ""; let targetContainer = attendList; 
+    
+    if (player.identity === "季租") { idClass = "bg-blue"; labelText = "季租"; finalAttendCount++; } else { let idx = casualPlayers.findIndex(c => c.name === player.name); if (isClosed) { if (idx !== -1 && idx < availableSlots) { idClass = "bg-green"; labelText = `散打(遞補 ${idx + 1})`; finalAttendCount++; } else { idClass = "bg-orange"; labelText = `散打(候 ${idx - availableSlots + 1})`; targetContainer = waitList; finalWaitCount++; } } else { idClass = "bg-orange"; labelText = `散打(候 ${idx + 1})`; targetContainer = waitList; finalWaitCount++; } }
+    
+    const tagSpan = document.createElement("span"); tagSpan.className = `identity-tag ${idClass}`; tagSpan.innerText = labelText; metaDiv.appendChild(tagSpan); li.appendChild(metaDiv); const timeDiv = document.createElement("div"); timeDiv.className = "time-tag"; timeDiv.innerText = `⏱️ ${timeStr}`; li.appendChild(timeDiv);
+    if (isAdminMode) { const delBtn = document.createElement("button"); delBtn.innerText = "❌ 刪除"; delBtn.style.cssText = "align-self:flex-end; font-size:11px; margin-top:5px; cursor:pointer; width:auto; padding:2px 8px; background:#ef4444;"; delBtn.addEventListener("click", () => { if(confirm(`確認刪除 ${player.name}？`)) database.ref(`sessions/${session.gameDateStr}/${player.name}`).remove(); }); li.appendChild(delBtn); } targetContainer.appendChild(li);
+  });
+  
+  leavePlayers.forEach(player => {
+    const timeStr = formatFullTimestamp(player.timestamp); const li = document.createElement("li"); const metaDiv = document.createElement("div"); metaDiv.className = "player-meta"; const nameSpan = document.createElement("span"); nameSpan.innerHTML = `<b>${player.name}</b>`; metaDiv.appendChild(nameSpan); const idClass = player.identity === "季租" ? "bg-blue" : "bg-green"; const tagSpan = document.createElement("span"); tagSpan.className = `identity-tag ${idClass}`; tagSpan.innerText = player.identity === "季租" ? "季租(假)" : "散打(假)"; metaDiv.appendChild(tagSpan); li.appendChild(metaDiv); const timeDiv = document.createElement("div"); timeDiv.className = "time-tag"; timeDiv.innerText = `⏱️ ${timeStr}`; li.appendChild(timeDiv);
+    if (isAdminMode) { const delBtn = document.createElement("button"); delBtn.innerText = "❌ 刪除"; delBtn.style.cssText = "align-self:flex-end; font-size:11px; margin-top:5px; cursor:pointer; width:auto; padding:2px 8px; background:#ef4444;"; delBtn.addEventListener("click", () => { database.ref(`sessions/${session.gameDateStr}/${player.name}`).remove(); }); li.appendChild(delBtn); } leaveList.appendChild(li);
+  });
+  document.getElementById("attendCount").innerText = finalAttendCount; document.getElementById("waitCount").innerText = finalWaitCount; document.getElementById("leaveCount").innerText = leavePlayers.length;
+}
+
+submitBtn.addEventListener("click", () => {
+  const name = nameInput.value.trim(); const identity = identitySelect.value; const status = document.querySelector('input[name="status"]:checked').value; const now = new Date();
+  if (!name) { alert("請輸入姓名！"); return; } if (now < session.openTime) { alert("抱歉！本輪球聚尚未開放登記。"); return; } 
+  if (now >= session.deadline && !isAdminMode) { alert("🔒 報名已於週四 18:00 截止，目前系統已鎖定，無法再進行新增或修改意願。"); return; }
+  
+  submitBtn.disabled = true; submitBtn.innerText = "處理中...";
+  const userRef = database.ref(`sessions/${session.gameDateStr}/${name}`);
+  
+  userRef.set({ 
+    name: name, 
+    identity: identity, 
+    status: status, 
+    timestamp: firebase.database.ServerValue.TIMESTAMP 
+  }).then(() => { 
+    alert(`🎉 【${name}】資料已更新成功！\n排序已依據此修改時間重新調整。`); 
+    nameInput.value = ""; 
+  }).catch(err => {
+    alert("儲存失敗：" + err.message);
+  }).finally(() => { 
+    submitBtn.disabled = false; 
+    submitBtn.innerText = "確認送出報名"; 
+  });
+});
+</script>
+</body>
+</html>
